@@ -2,7 +2,8 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = "vaidehipipare/sample-app"
+        IMAGE_NAME = "981629166290.dkr.ecr.eu-north-1.amazonaws.com/sample-app"
+        AWS_REGION = "eu-north-1"
     }
 
     stages {
@@ -16,29 +17,44 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                sh 'docker build -t $IMAGE_NAME:latest .'
+                sh 'docker build -t sample-app .'
             }
         }
 
-        stage('Test') {
+        stage('Tag Docker Image') {
             steps {
-                sh 'docker images'
+                sh 'docker tag sample-app:latest $IMAGE_NAME:latest'
             }
         }
 
-        stage('Push Image') {
+        stage('Login to AWS ECR') {
             steps {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-creds',
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                ]]) {
 
-                withCredentials([usernamePassword(
-                    credentialsId: 'dockerhub-creds',
-                    usernameVariable: 'DOCKER_USER',
-                    passwordVariable: 'DOCKER_PASS'
-                )]) {
-
-                    sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
-
-                    sh 'docker push $IMAGE_NAME:latest'
+                    sh '''
+                    aws ecr get-login-password --region $AWS_REGION | \
+                    docker login --username AWS \
+                    --password-stdin 981629166290.dkr.ecr.eu-north-1.amazonaws.com
+                    '''
                 }
+            }
+        }
+
+        stage('Push Docker Image') {
+            steps {
+                sh 'docker push $IMAGE_NAME:latest'
+            }
+        }
+
+        stage('Deploy to EKS') {
+            steps {
+                sh 'kubectl apply -f k8s/deployment.yaml'
+                sh 'kubectl apply -f k8s/service.yaml'
             }
         }
     }
